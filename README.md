@@ -62,7 +62,8 @@ Giữ nguyên split từ annotation. Ghi rõ tập phát triển và tập đo c
 
 ## 8. Trạng thái và lệnh tải
 
-Bộ cài tạo cấu trúc, cấu hình, README và downloader. Mã inference, API, benchmark và tests được tạo dưới dạng khung để triển khai theo mục 6. Danh sách dependencies là kế hoạch ban đầu; chốt phiên bản khi kiểm thử CUDA và model.
+Repo hiện có implementation cho dữ liệu, hai pipeline, API, web, benchmark và test.
+Các giới hạn model thật đã đo được ghi ở mục 13; không coi fake backend là kết quả model.
 
 Từ thư mục gốc, chạy lại downloader:
 
@@ -83,16 +84,20 @@ Môi trường đã kiểm tra: Windows 11, Python 3.11.9. Từ thư mục gốc
 
 ```powershell
 python -m pip install -r requirements.txt
+python -m pip install --force-reinstall torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu128
 $env:PYTHONPATH="src"
 python -m uvicorn grounded_vision.api:app --host 127.0.0.1 --port 8000
 ```
 
 Mở `http://127.0.0.1:8000`. Model được nạp lười ở yêu cầu đầu tiên. `GET /health`
-chỉ kiểm tra API, không tải model. Lỗi tải model (503), inference (500), parse output
+không tải model và báo riêng VLM/detector là `not_loaded` hay `ready`. Runtime đọc
+`configs/app.yaml`; ưu tiên là mặc định < YAML < biến môi trường `GVA_*`. Benchmark
+đọc `configs/benchmark.yaml`, sau đó CLI override. Lỗi tải model (503), inference (500), parse output
 (502), ảnh đầu vào (400) và validation (422) tách khỏi ba trạng thái nghiệp vụ.
 
-Qwen2.5-VL trả tọa độ theo kích thước pixel thực của ảnh (không dùng không gian 0..1000
-của một số recipe Qwen2-VL cũ). Grounding DINO trả box pixel sau
+Qwen2.5-VL trả tọa độ theo kích thước pixel thực của ảnh model. App resize ảnh một lần
+theo `max_image_side`, rồi nhân riêng scale X/Y để đưa box về ảnh gốc đã chuẩn hóa EXIF.
+Grounding DINO trả box pixel sau
 `post_process_grounded_object_detection(..., target_sizes=[(height,width)])`.
 Hai adapter chạy batch size 1. Ngưỡng proposal mặc định `box=0.25`, `text=0.20` là
 điểm khởi đầu từ API model, **chưa được tune trên test split**; không dùng số benchmark
@@ -105,7 +110,7 @@ Preview nhanh không ghi file, sau đó xuất manifest tái lập:
 ```powershell
 python scripts/prepare_dataset.py --dataset refcoco --split val --limit 3 --seed 42 --preview 1
 python scripts/prepare_dataset.py --dataset refcoco --split val --limit 100 --seed 42 --output data/manifests/refcoco-val-100.jsonl
-python scripts/prepare_dataset.py --dataset refcocog --split test --limit 100 --seed 42 --output data/manifests/refcocog-test-100.jsonl
+python scripts/prepare_dataset.py --dataset refcocog --split val --limit 100 --seed 42 --output data/manifests/refcocog-val-100.jsonl
 ```
 
 Loader chỉ mở các pickle có tên cố định bên trong thư mục REFER đã cấu hình. Mỗi dòng
@@ -113,6 +118,11 @@ JSONL có `id`, dataset/split, ID ảnh/annotation, đường dẫn ảnh tươn
 `gold_status`, `gold_bbox_xyxy`, và cờ `is_test_data`. Manifest tiếng Việt là tùy chọn
 ở `data/vietnamese/annotations.jsonl`; loader báo rõ nếu chưa có. Dữ liệu tự tạo phải
 đặt `is_test_data: true`.
+
+Split thực tế: RefCOCO UNC có `train`, `val`, `testA`, `testB`; RefCOCOg Google chỉ có
+`train`, `val`. Split không tồn tại, manifest rỗng và limit ≤ 0 đều trả exit code 2.
+Downloader thử HTTP rồi HTTPS cho hai archive COCO và kiểm SHA-256 trước giải nén;
+checksum lấy từ catalog TensorFlow Datasets.
 
 ## 12. Test và benchmark
 
@@ -129,23 +139,28 @@ công bố. Grounding Acc@0.5 tính trên mẫu gold `found`; proposal recall đ
 bước chọn; false-positive/ambiguity recall chỉ xuất hiện khi manifest có nhãn tương
 ứng. Latency dùng p50/p95. CUDA peak là `max_memory_allocated`; trường này null nếu
 PyTorch không có CUDA. Cấu hình model, precision, Python, máy, seed và warm-up được lưu
-cùng báo cáo. Hiện `--warmup` mới ghi metadata; nên chạy một manifest warm-up riêng
-trước lượt đo chính để không trộn thời gian tải model.
+cùng báo cáo. `--warmup N` thực hiện N lượt cho từng backend trong cùng tiến trình,
+ghi cold-start riêng và loại toàn bộ warm-up khỏi latency steady-state. VRAM được reset
+và đo riêng từng backend. Report ghi mẫu số từng metric và trả exit code 2 nếu một
+backend không có lượt hợp lệ.
 
 ## 13. Trạng thái kiểm chứng tại máy phát triển
 
-- `12 passed`: conversion, IoU, percentile, trạng thái direct/proposal, proposal miss,
-  selector, query rỗng, schema multipart và ảnh hỏng.
+- `24 passed`: metrics, trạng thái pipeline, output model sai, resize/scale, prompt Việt,
+  benchmark absent/ambiguous, diagnosis, warm-up, config và hợp đồng API.
 - Đã nối thật RefCOCO `ref_id=0`, `ann_id=1719310`, `image_id=581857`; ảnh JPEG tồn tại,
   kích thước 427×640, gold box `[103.93,299.99,238.15,477.41]`.
 - Đã xuất `data/manifests/refcoco-val-smoke.jsonl` từ ảnh thật.
 - API thật trả health JSON và trang web trả HTTP 200 trên localhost.
-- Grounding DINO tiny đã chạy thật trên ảnh COCO 559760, query `front giraffe`, trả
-  `[54.46,62.04,335.66,386.96]`; gold `[56.67,63.65,304.30,383.64]`, IoU xấp xỉ 0.87.
-- Máy có RTX 4060 Laptop 8188 MiB nhưng PyTorch hiện là `2.15.0+cpu`; vì vậy chưa thể
-  đo CUDA VRAM hay xác minh Qwen2.5-VL-3B trên GPU. Direct inference và bước Qwen chọn
-  proposal chưa được tuyên bố là đã chạy thật. Cài đúng wheel PyTorch CUDA tương thích
-  driver rồi chạy smoke benchmark để hoàn tất hai bước này.
+- Grounding DINO tiny đã chạy thật bằng CUDA trên ảnh COCO 559760, query `front giraffe`,
+  trả `[54.45,62.03,335.69,386.97]`; IoU `0.867`, peak allocated `1.964 GiB`.
+- CUDA đã hoạt động: PyTorch `2.9.1+cu128`, RTX 4060 Laptop 8 GB,
+  `torch.cuda.is_available() == True`.
+- Qwen base fp16 đã tải nhưng load toàn GPU OOM ở allocator 5.73 GiB. Offload 4 GiB và
+  bitsandbytes 4-bit đều bị Windows `os error 1455` do pagefile quá nhỏ khi mmap shard.
+  Checkpoint AWQ chính thức tránh shard lớn nhưng AutoAWQ cần Triton, hiện không có wheel
+  Windows. Vì vậy direct Qwen và DINO→Qwen **chưa nghiệm thu model thật**; smoke benchmark
+  hai backend chưa khả dụng trên máy này cho đến khi tăng pagefile hoặc chạy WSL2/Linux.
 - Tập tiếng Việt tự gán nhãn chưa tồn tại, nên chưa đo false-positive và ambiguity recall.
 
 ## 14. Tự viết lại project
@@ -179,7 +194,7 @@ implementation tham chiếu.
 **Cụm 2 — manifest → inference → API**
 
 - Code: benchmark mở ảnh, chuẩn hóa EXIF, gọi `GroundingPipeline.run`; API gọi cùng hàm.
-- Console Output: Không có (Qwen cho mẫu này chưa được chạy thật trên môi trường CPU-only).
+- Console Output: Không có (Qwen chưa load được do pagefile Windows; xem blocker mục 13).
 - Internal State: minh họa `status=found`, `bbox_xyxy=<model output>`, kích thước 427×640.
 - Explanation: pipeline clip/validate box; lỗi model đi theo exception/HTTP code riêng.
 

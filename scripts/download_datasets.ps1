@@ -29,13 +29,15 @@ $datasets = @(
         Destination = 'data\raw\coco'
         Required = @('train2014\COCO_train2014_000000000009.jpg')
         ImageCount = 82783
-        Urls = @('https://images.cocodataset.org/zips/train2014.zip')
+        Sha256 = 'ede4087e640bddba550e090eae701092534b554b42b05ac33f0300b984b31775'
+        Urls = @('http://images.cocodataset.org/zips/train2014.zip', 'https://images.cocodataset.org/zips/train2014.zip')
     }
     @{
         Name = 'annotations_trainval2014'
         Destination = 'data\raw\coco'
         Required = @('annotations\instances_train2014.json', 'annotations\instances_val2014.json')
-        Urls = @('https://images.cocodataset.org/annotations/annotations_trainval2014.zip')
+        Sha256 = '031296bbc80c45a1d1f76bf9a90ead27e94e99ec629208449507a4917a3bf009'
+        Urls = @('http://images.cocodataset.org/annotations/annotations_trainval2014.zip', 'https://images.cocodataset.org/annotations/annotations_trainval2014.zip')
     }
 )
 
@@ -90,6 +92,14 @@ function Install-Dataset {
             if ($LASTEXITCODE -ne 0) {
                 continue
             }
+            if ($Dataset.ContainsKey('Sha256')) {
+                $actual = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actual -ne $Dataset.Sha256) {
+                    Write-Warning "SHA-256 mismatch for $name from $url"
+                    Remove-Item -LiteralPath $partial -Force
+                    continue
+                }
+            }
             & $tar -tf $partial | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Remove-Item -LiteralPath $partial -Force
@@ -102,6 +112,10 @@ function Install-Dataset {
 
     if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
         throw "Could not download $name.zip. Rerun the downloader or place the original ZIP in $downloads."
+    }
+    if ($Dataset.ContainsKey('Sha256')) {
+        $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $Dataset.Sha256) { throw "SHA-256 mismatch for existing archive $archive" }
     }
     Write-Host "[EXTRACT] $name"
     & $tar -xf $archive -C $destination

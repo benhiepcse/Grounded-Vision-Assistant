@@ -1,6 +1,9 @@
 vlm:
   model_id: Qwen/Qwen2.5-VL-3B-Instruct
   device: auto
+  max_image_side: 1024
+  max_gpu_memory_gib: 6.0
+  load_in_4bit: true
 inference:
   backend: direct
   max_upload_mb: 10

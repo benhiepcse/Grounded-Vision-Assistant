@@ -12,6 +12,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from grounded_vision.metrics import coco_xywh_to_xyxy  # noqa: E402
+from grounded_vision.image_io import validate_box  # noqa: E402
+from PIL import Image, ImageOps  # noqa: E402
 
 SPLIT_FILES = {("refcoco", "unc"): "refs(unc).p", ("refcocog", "google"): "refs(google).p"}
 
@@ -56,12 +58,29 @@ def load_refer(dataset: str, split_by: str, refer_root: Path, image_root: Path) 
 
 def load_vietnamese(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
-        print(f"INFO: Vietnamese manifest is optional and missing: {path}", file=sys.stderr)
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        raise FileNotFoundError(f"Vietnamese annotation is missing: {path}")
+    records = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip(): continue
+        source = json.loads(line)
+        record = dict(source)
+        record["id"] = source.get("id", source.get("sample_id"))
+        record["gold_status"] = source.get("gold_status", source.get("status"))
+        record["gold_bbox_xyxy"] = source.get("gold_bbox_xyxy", source.get("bbox_xyxy"))
+        record.setdefault("dataset", "vietnamese")
+        record.setdefault("is_test_data", False)
+        for old in ("sample_id", "status", "bbox_xyxy"): record.pop(old, None)
+        if not isinstance(record.get("id"), str) or not record["id"].strip(): raise ValueError(f"Line {line_number}: invalid id")
+        if record.get("gold_status") not in {"found", "ambiguous", "not_found"}: raise ValueError(f"Line {line_number}: invalid status")
+        if not isinstance(record.get("query"), str) or not record["query"].strip(): raise ValueError(f"Line {line_number}: empty query")
+        records.append(record)
+    return records
 
 
 def select(records: list[dict[str, Any]], split: str | None, limit: int | None, seed: int) -> list[dict[str, Any]]:
+    if limit is not None and limit <= 0: raise ValueError("--limit must be positive")
+    available = sorted({record["split"] for record in records})
+    if split is not None and split not in available: raise ValueError(f"Unknown split {split!r}; available: {available}")
     chosen = [record for record in records if split is None or record["split"] == split]
     if limit is not None and limit < len(chosen):
         chosen = random.Random(seed).sample(chosen, limit)
@@ -84,9 +103,15 @@ def main() -> None:
         split_by = args.split_by or ("unc" if args.dataset == "refcoco" else "google")
         records = load_refer(args.dataset, split_by, ROOT / "data/raw/refer", ROOT / "data/raw/coco/train2014")
     records = select(records, args.split, args.limit, args.seed)
+    if not records: raise ValueError("No records selected")
     for record in records:
-        if not (ROOT / record["image_path"]).is_file():
-            raise FileNotFoundError(ROOT / record["image_path"])
+        image_path = ROOT / record["image_path"]
+        if not image_path.is_file(): raise FileNotFoundError(image_path)
+        status, box = record["gold_status"], record.get("gold_bbox_xyxy")
+        if status == "found":
+            with Image.open(image_path) as source: width, height = ImageOps.exif_transpose(source).size
+            record["gold_bbox_xyxy"] = list(validate_box(tuple(box), width, height))
+        elif box is not None: raise ValueError(f"{record['id']}: {status} requires null gold box")
     if args.preview:
         print(json.dumps(records[: args.preview], ensure_ascii=False, indent=2))
         return
@@ -96,4 +121,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)

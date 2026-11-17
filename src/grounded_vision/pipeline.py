@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw
 
 from .image_io import validate_box
 from .schemas import GroundingResult, GroundingStatus
+from .vlm import ModelOutputError
 
 
 class DirectBackend(Protocol):
@@ -25,11 +26,14 @@ def _status(value: Any) -> GroundingStatus:
     try:
         return GroundingStatus(str(value))
     except ValueError as exc:
-        raise ValueError(f"Unknown business status from model: {value!r}") from exc
+        raise ModelOutputError(f"Unknown business status from model: {value!r}") from exc
 
 
 def _result(status: GroundingStatus, box: Any, image: Image.Image, backend: str, started: float, **extra: Any) -> GroundingResult:
-    valid = validate_box(tuple(box), *image.size) if status == GroundingStatus.FOUND else None
+    try:
+        valid = validate_box(tuple(box), *image.size) if status == GroundingStatus.FOUND else None
+    except (TypeError, ValueError) as exc:
+        raise ModelOutputError(f"Invalid model bbox: {box!r}") from exc
     return GroundingResult(status=status, bbox_xyxy=valid, image_width=image.width, image_height=image.height,
                            backend=backend, latency_ms=(time.perf_counter() - started) * 1000, **extra)
 
@@ -59,7 +63,7 @@ class GroundingPipeline:
             raise ValueError("Backend phải là 'direct' hoặc 'proposal'.")
         if self.detector is None or self.selector is None:
             raise RuntimeError("Proposal backend is not configured")
-        boxes = [validate_box(box, *image.size) for box in self.detector.propose(image, query)]
+        boxes = deduplicate_boxes([validate_box(box, *image.size) for box in self.detector.propose(image, query)])
         if not boxes:
             return _result(GroundingStatus.NOT_FOUND, None, image, backend, started,
                            candidate_boxes=[], proposal_failure=True, selection_failure=False)
@@ -68,9 +72,18 @@ class GroundingPipeline:
         index = output.get("index")
         if status == GroundingStatus.FOUND:
             if not isinstance(index, int) or not 0 <= index < len(boxes):
-                raise ValueError(f"Selector returned invalid candidate index: {index!r}")
+                raise ModelOutputError(f"Selector returned invalid candidate index: {index!r}")
             box = boxes[index]
         else:
             box = None
         return _result(status, box, image, backend, started, candidate_boxes=boxes,
                        proposal_failure=False, selection_failure=status != GroundingStatus.FOUND)
+
+
+def deduplicate_boxes(boxes: list[tuple[float, float, float, float]], iou_threshold: float = 0.9) -> list[tuple[float, float, float, float]]:
+    from .metrics import box_iou
+    kept: list[tuple[float, float, float, float]] = []
+    for box in boxes:
+        if all(box_iou(box, previous) < iou_threshold for previous in kept):
+            kept.append(box)
+    return kept

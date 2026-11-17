@@ -1,0 +1,1 @@
+{"sample_id":"vi-fixture-001","dataset":"vietnamese","split":"fixture","image_path":"data/raw/coco/train2014/COCO_train2014_000000559760.jpg","query":"con hươu cao cổ phía trước","status":"found","bbox_xyxy":[56.67,63.65,304.3,383.64],"is_test_data":true}

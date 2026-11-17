@@ -7,12 +7,13 @@ from .vlm import ModelInferenceError, ModelLoadError
 
 
 def detector_prompt(query: str) -> str:
-    """Conservative noun-like prompt; full query remains available to VLM selection."""
+    """Extract the target phrase before a spatial relation; never include its reference."""
     cleaned = re.sub(r"[^\w\s-]", " ", query.lower(), flags=re.UNICODE)
+    relation = re.split(r"\b(?:bên trái|bên phải|cạnh|phía trên|phía dưới|left of|right of|next to|beside|above|below|near)\b", cleaned, maxsplit=1)[0]
     stop = {"the", "a", "an", "on", "in", "at", "left", "right", "of", "beside", "with",
             "chiếc", "cái", "con", "bên", "trái", "phải", "của", "cạnh", "trên", "dưới", "màu"}
-    tokens = [token for token in cleaned.split() if token not in stop]
-    return " ".join(tokens) or cleaned.strip()
+    tokens = [token for token in relation.split() if token not in stop]
+    return " ".join(tokens) or relation.strip()
 
 
 class GroundingDinoDetector:
