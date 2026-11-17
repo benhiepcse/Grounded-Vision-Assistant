@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+/data/downloads/
+/data/raw/
+/data/processed/
+/data/vietnamese/*
+!/data/vietnamese/README.md
+/outputs/
+/models/

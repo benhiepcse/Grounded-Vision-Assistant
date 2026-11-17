@@ -1,0 +1,1 @@
+"""Grounded Vision Assistant package."""

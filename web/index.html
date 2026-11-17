@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grounded Vision Assistant</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header><p class="eyebrow">LOCAL VISUAL GROUNDING</p><h1>Grounded Vision Assistant</h1><p>Khoanh vùng vật thể từ mô tả tiếng Việt hoặc tiếng Anh.</p></header>
+    <form id="ground-form">
+      <label>Ảnh JPEG/PNG (tối đa 10 MB)<input id="image" name="image" type="file" accept="image/jpeg,image/png" required></label>
+      <label>Mô tả<input id="query" name="query" placeholder="chiếc cốc trắng bên trái bàn phím" required></label>
+      <label>Phương pháp<select id="backend" name="backend"><option value="direct">Direct Qwen2.5-VL</option><option value="proposal">Grounding DINO + Qwen</option></select></label>
+      <button type="submit">Định vị vật thể</button>
+    </form>
+    <p id="message" role="status">Chọn ảnh để bắt đầu.</p>
+    <section class="results">
+      <div><h2>Ảnh và kết quả</h2><div id="stage" class="stage"><img id="preview" alt="Ảnh được tải lên"><div id="box"></div></div></div>
+      <div><h2>Vùng bằng chứng</h2><canvas id="crop"></canvas><dl id="details"></dl></div>
+    </section>
+  </main>
+</body>
+</html>

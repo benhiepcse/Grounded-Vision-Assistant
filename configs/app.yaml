@@ -1,0 +1,6 @@
+vlm:
+  model_id: Qwen/Qwen2.5-VL-3B-Instruct
+  device: auto
+inference:
+  backend: direct
+  max_upload_mb: 10

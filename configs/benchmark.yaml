@@ -1,0 +1,11 @@
+datasets:
+  coco_images: data/raw/coco/train2014
+  refcoco: data/raw/refer/refcoco
+  refcoco_split_by: unc
+  refcocog: data/raw/refer/refcocog
+  refcocog_split_by: google
+  vietnamese: data/vietnamese/annotations.jsonl
+evaluation:
+  seed: 42
+  iou_threshold: 0.5
+  output_dir: outputs
